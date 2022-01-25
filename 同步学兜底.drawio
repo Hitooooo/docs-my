@@ -1,4 +1,4 @@
-<mxfile host="app.diagrams.net" modified="2022-01-25T06:40:03.142Z" agent="5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/97.0.4692.99 Safari/537.36 Edg/97.0.1072.69" etag="MrMkC4SpcxxRd1cSK2wL" version="16.4.6" type="github">
+<mxfile host="app.diagrams.net" modified="2022-01-25T06:47:57.817Z" agent="5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/97.0.4692.99 Safari/537.36 Edg/97.0.1072.69" etag="vmSONHyVYwjHTKrhID93" version="16.4.6" type="github">
   <diagram id="dgvY_rVGDL0mgEJ4h0jD" name="第 1 页">
     <mxGraphModel dx="1038" dy="547" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
       <root>
@@ -102,6 +102,15 @@
         </mxCell>
         <mxCell id="iDCLeAGYW5DPLVCuSpxa-20" value="User" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;strokeWidth=1;" vertex="1" parent="1">
           <mxGeometry x="130" y="610" width="30" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="iDCLeAGYW5DPLVCuSpxa-38" value="" style="endArrow=none;dashed=1;html=1;dashPattern=1 3;strokeWidth=2;rounded=0;fontFamily=Helvetica;" edge="1" parent="1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="90" y="600" as="sourcePoint" />
+            <mxPoint x="800" y="600" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="iDCLeAGYW5DPLVCuSpxa-39" value="&lt;b&gt;&lt;font style=&quot;font-size: 14px&quot;&gt;支持范围，以下接口不限制业务码：&lt;/font&gt;&lt;/b&gt;&lt;br&gt;com.iflytek.epd.engineservice.adaptive.service.impl.AdaptiveEvaluationServiceImpl#adaptiveEvaluationByCatalog&lt;br&gt;com.iflytek.epd.engineservice.adaptive.service.impl.AdaptiveRecommendServiceImpl#weakPointRecommend&lt;br&gt;com.iflytek.epd.engineservice.adaptive.service.impl.StudentPortraitServiceImpl#computePortraitByCatalogCode&lt;br&gt;com.iflytek.epd.engineservice.adaptive.service.impl.StudentPortraitServiceImpl#searchWeakPointByCatalogs" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontFamily=Helvetica;" vertex="1" parent="1">
+          <mxGeometry x="130" y="100" width="616" height="80" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>
