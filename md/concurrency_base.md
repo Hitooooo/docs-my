@@ -1,35 +1,6 @@
 # Java并发编程
 
-- [Java并发编程](#java并发编程)
-  - [一、基础](#一基础)
-    - [1. Java中使用线程](#1-java中使用线程)
-      - [1.1 Thread类和Runnable接口](#11-thread类和runnable接口)
-      - [1.2 Callable、Future与FutureTask](#12-callablefuture与futuretask)
-    - [2. 线程的状态及转换](#2-线程的状态及转换)
-      - [2.1 操作系统中的线程状态切换](#21-操作系统中的线程状态切换)
-      - [2.2 Java中线程状态的切换](#22-java中线程状态的切换)
-        - [NEW](#new)
-        - [RUNNABLE](#runnable)
-        - [BLOCKED](#blocked)
-        - [WAITING](#waiting)
-        - [TIMED_WAITING](#timed_waiting)
-        - [TERMINATED](#terminated)
-    - [3. 线程间通信](#3-线程间通信)
-      - [3.1 锁与同步](#31-锁与同步)
-      - [3.2 等待/通知机制](#32-等待通知机制)
-      - [3.3 管道输入/输出流](#33-管道输入输出流)
-      - [3.4 Thread.join()](#34-threadjoin)
-      - [3.5 ThreadLocal()](#35-threadlocal)
-  - [二、实践](#二实践)
-    - [1. 线程池](#1-线程池)
-      - [1.1 Java线程池原理](#11-java线程池原理)
-        - [1.1.1 构造](#111-构造)
-        - [1.1.2 任务处理流程](#112-任务处理流程)
-        - [1.1.3 线程池如何复用线程](#113-线程池如何复用线程)
-      - [1.2 四种常见线程池](#12-四种常见线程池)
-    - [2. 阻塞队列](#2-阻塞队列)
-    - [3. 原子操作类](#3-原子操作类)
-  - [三、原理](#三原理)
+[toc]
 
 最初的计算机只能接受一些特定的指令，用户每输入一个指令，计算机就做出一个操作。
 为充分利用计算机CPU:
@@ -63,7 +34,7 @@
 
 4. 协程(Coroutine)
 
-   ![x](https://raw.githubusercontent.com/Hitooooo/docs-my/main/pic-go-bed/process_thread_goroutine.webp)
+   ![coroutine](https://raw.githubusercontent.com/Hitooooo/docs-my/main/pic-go-bed/process_thread_goroutine.webp)
 
    一个协程代表一个具体的任务，一个线程内部可包含一组协程队列，换句话说，协程运行在线程之上，线程是协程的运行环境。协程非常适用于处理 I/O 密集型任务，这是因为协程的上下文切换无需由内核调度介入，同时也不会发生系统调用，因此，任务可获得大量的 CPU 时间。
 
@@ -837,7 +808,7 @@ private Runnable getTask() {
    public static ScheduledExecutorService newScheduledThreadPool(int corePoolSize) {
     return new ScheduledThreadPoolExecutor(corePoolSize);
     }
-
+   
     //ScheduledThreadPoolExecutor():
     public ScheduledThreadPoolExecutor(int corePoolSize) {
         super(corePoolSize, Integer.MAX_VALUE,
@@ -853,6 +824,32 @@ private Runnable getTask() {
 > 4. 都几乎不会触发拒绝策略，但是原理不同。FixedThreadPool是因为阻塞队列可以很大（最大为Integer最大值），故几乎不会触发拒绝策略；CachedThreadPool是因为线程池很大（最大为Integer最大值），几乎不会导致线程数量大于最大线程数，故几乎不会触发拒绝策略。
 
 ### 2. 阻塞队列
+
+我们假设一种场景，生产者一直生产资源，消费者一直消费资源，资源存储在一个缓冲池中，生产者将生产的资源存进缓冲池中，消费者从缓冲池中拿到资源进行消费，这就是大名鼎鼎的**生产者-消费者模式**。该模式能够简化开发过程，一方面消除了生产者类与消费者类之间的代码依赖性，另一方面将生产数据的过程与使用数据的过程解耦简化负载。
+
+> BlockingQueue是Java util.concurrent包下重要的数据结构，区别于普通的队列，BlockingQueue提供了**线程安全的队列访问方式**，并发包下很多高级同步类的实现都是基于BlockingQueue实现的。
+
+#### 2.1 BlockingQueue的实现类
+
+由**数组**结构组成的**有界**阻塞队列。内部结构是数组，故具有数组的特性。
+
+```java
+public ArrayBlockingQueue(int capacity, boolean fair){
+    //..省略代码
+}
+```
+
+可以初始化队列大小， 且一旦初始化不能改变。构造方法中的fair表示控制对象的内部锁是否采用公平锁，默认是**非公平锁**
+
+##### **ArrayBlockingQueue**
+
+##### **LinkedBlockingQueue**
+
+##### **DelayQueue**
+
+#### 2.2 阻塞队列原理
+
+
 
 ### 3. 原子操作类
 
