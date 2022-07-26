@@ -829,7 +829,27 @@ private Runnable getTask() {
 
 > BlockingQueue是Java util.concurrent包下重要的数据结构，区别于普通的队列，BlockingQueue提供了**线程安全的队列访问方式**，并发包下很多高级同步类的实现都是基于BlockingQueue实现的。
 
-#### 2.1 BlockingQueue的实现类
+#### BlockingQueue接口定义
+
+```java
+public interface BlockingQueue<E> extends Queue<E> {
+}
+```
+
+| 方法\处理方式 | 抛出异常  | 返回特殊值 |  一直阻塞  |      超时退出      |
+| :-----------: | :-------: | :--------: | :--------: | :----------------: |
+|   插入方法    |  add(e)   |  offer(e)  | **put(e)** | offer(e,time,unit) |
+|   移除方法    | remove()  |   poll()   | **take()** |  poll(time,unit)   |
+|   检查方法    | element() |   peek()   |     -      |         -          |
+
+- 抛出异常：如果试图的操作无法立即执行，抛异常。当阻塞队列满时候，再往队列里插入元素，会抛出IllegalStateException(“Queue full”)异常。当队列为空时，从队列里获取元素时会抛出NoSuchElementException异常 。
+- 返回特殊值：如果试图的操作无法立即执行，返回一个特殊值，通常是true / false。
+- 一直阻塞：如果试图的操作无法立即执行，则一直阻塞或者响应中断。
+- 超时退出：如果试图的操作无法立即执行，该方法调用将会发生阻塞，直到能够执行，但等待时间不会超过给定值。返回一个特定值以告知该操作是否成功，通常是 true / false。
+
+#### BlockingQueue的实现类
+
+##### **ArrayBlockingQueue**
 
 由**数组**结构组成的**有界**阻塞队列。内部结构是数组，故具有数组的特性。
 
@@ -841,16 +861,87 @@ public ArrayBlockingQueue(int capacity, boolean fair){
 
 可以初始化队列大小， 且一旦初始化不能改变。构造方法中的fair表示控制对象的内部锁是否采用公平锁，默认是**非公平锁**
 
-##### **ArrayBlockingQueue**
-
 ##### **LinkedBlockingQueue**
+
+由**链表**结构组成的**有界**阻塞队列。内部结构是链表，具有链表的特性。默认队列的大小是`Integer.MAX_VALUE`，也可以指定大小。此队列按照**先进先出**的原则对元素进行排序。
+
+**PriorityBlockingQueue**不会阻塞数据生产者（因为队列是无界的），而只会在没有可消费的数据时，阻塞数据的消费者。因此使用的时候要特别注意，**生产者生产数据的速度绝对不能快于消费者消费数据的速度，否则时间一长，会最终耗尽所有的可用堆内存空间。**对于使用默认大小的**LinkedBlockingQueue**也是一样的。
 
 ##### **DelayQueue**
 
-#### 2.2 阻塞队列原理
+该队列中的元素只有当其指定的延迟时间到了，才能够从队列中获取到该元素 。注入其中的元素必须实现 java.util.concurrent.Delayed 接口。 
 
+DelayQueue是一个没有大小限制的队列，因此往队列中插入数据的操作（生产者）永远不会被阻塞，而只有获取数据的操作（消费者）才会被阻塞。
 
+##### PriorityBlockingQueue
+
+基于优先级的无界阻塞队列（优先级的判断通过构造函数传入的Compator对象来决定），内部控制线程同步的锁采用的是非公平锁。
+
+##### **SynchronousQueue**（newCachedThreadPool使用的内置队列）
+
+这个队列比较特殊，**没有任何内部容量**，甚至连一个队列的容量都没有。并且每个put必须等待一个take，反之亦然。
+
+需要区别容量为1的ArrayBlockingQueue、LinkedBlockingQueue。
+
+以下方法的返回值，可以帮助理解这个队列：
+
+- iterator() 永远返回空，因为里面没有东西
+
+- peek() 永远返回null
+
+- put() 往queue放进去一个element以后就一直wait直到有其他thread进来把这个element取走。
+
+- **offer() 往queue里放一个element后立即返回，如果碰巧这个element被另一个thread取走了，offer方法返回true，认为offer成功；否则返回false。**现在回头重现看下线程池中核心处理代码段，如果采用SynchronousQueue：
+
+  ```java
+  // 对于CachedThreadPool，核心线程池个数为0
+  // 1. 刚开始offer返回false，跳掉else if新建非核心线程池处理任务
+  if (isRunning(c) && workQueue.offer(command)) {
+    // 2. 如果offer刚好被未回收的非核心线程消费，进入
+    int recheck = ctl.get();
+    // 2.1 remove直接返回false不执行拒绝策略
+    if (!isRunning(recheck) && remove(command))
+      reject(command);
+    // 2.2 检查工作线程数，无则新建非核心线程处理任务
+    else if (workerCountOf(recheck) == 0)
+      addWorker(null, false);
+  }else if (!addWorker(command, false))
+    reject(command);
+  ```
+
+- take() 取出并且remove掉queue里的element，取不到东西他会一直等。
+
+- poll() 取出并且remove掉queue里的element，只有到碰巧另外一个线程正在往queue里offer数据或者put数据的时候，该方法才会取到东西。否则立即返回null。
+
+- isEmpty() 永远返回true
+
+- remove()&removeAll() 永远返回false
 
 ### 3. 原子操作类
+
+### 4. 锁接口和类
+
+``Synchronized``是Java的关键字，当它用来修饰一个方法或一个代码块时，能够保证在同一时刻最多只有一个线程执行该代码。因为当调用Synchronized修饰的代码时，并不需要显示的加锁和解锁的过程，所以叫**隐式锁**。
+
+synchronized有什么不足之处。
+
+- 如果临界区是只读操作，其实可以多线程一起执行，但使用synchronized的话，**同一时间只能有一个线程执行**。
+
+- synchronized无法知道线程有没有成功获取到锁，无法增加获取锁失败逻辑
+
+  ```csharp
+    public static void main(String[] args) throws InterruptedException {
+      Lock lock = new ReentrantLock();
+      //可以配置自己的锁，灵活地控制
+      lock.lock();//控制加锁的时机
+      lock.unlock();//控制释放的时机
+      lock.tryLock();//尝试获取这把锁
+      lock.tryLock(10,TimeUnit.SECONDS);//尝试10s内获取这把锁，如果过了时间还没获取到就放弃
+    }
+  ```
+
+- 使用synchronized，如果临界区因为IO或者sleep方法等原因阻塞了，而当前线程又没有释放锁，就会导致**所有线程等待**。
+
+实际上，Java在`java.util.concurrent.locks`包下，还为我们提供了几个关于锁的类和接口。它们有更强大的功能或更高的性能。（提供了无条件的、可轮询的、定时的、可中断的锁获取操作，所有的加锁和解锁操作方法都是显示的，因而称为**显示锁**。
 
 ## 三、原理
