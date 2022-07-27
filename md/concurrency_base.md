@@ -944,4 +944,76 @@ synchronized有什么不足之处。
 
 实际上，Java在`java.util.concurrent.locks`包下，还为我们提供了几个关于锁的类和接口。它们有更强大的功能或更高的性能。（提供了无条件的、可轮询的、定时的、可中断的锁获取操作，所有的加锁和解锁操作方法都是显示的，因而称为**显示锁**。
 
+#### 可重入锁
+
+可重入锁，也叫做**递归锁**，指的是同一线程外层函数获得锁之后 ，内层递归函数仍然有获取该锁的代码，但不受影响。
+
+synchronized关键字就是使用的重入锁。比如说，你在一个synchronized实例方法里面调用另一个本实例的synchronized实例方法，它可以重新进入这个锁，不会出现任何异常。
+
+```java
+public class AccountingSync implements Runnable {
+    static AccountingSync instance = new AccountingSync();
+    static int i = 0;
+    static int j = 0;
+
+    @Override
+    public void run() {
+        for (int j = 0; j < 1000000; j++) {
+            // this,当前实例对象锁
+            synchronized (this) {
+                i++;
+                increase();// synchronized的可重入性
+            }
+        }
+    }
+
+    public synchronized void increase() {
+        j++;
+    }
+
+    public static void main(String[] args) throws InterruptedException {
+        Thread t1 = new Thread(instance);
+        Thread t2 = new Thread(instance);
+        t1.start();
+        t2.start();
+        t1.join();
+        t2.join();
+        System.out.println("i:"+i);
+        System.out.println("j:"+j);
+    }
+}
+```
+
+输出：
+
+```tex
+i:2000000
+j:2000000
+```
+
+`ReentrantLock`的中文意思就是可重入锁，是另一个重要的显示重入锁。
+
+```java
+final boolean nonfairTryAcquire(int acquires) {
+  final Thread current = Thread.currentThread();
+  int c = getState();
+  if (c == 0) {
+    if (compareAndSetState(0, acquires)) {
+      setExclusiveOwnerThread(current);
+      return true;
+    }
+  }
+  else if (current == getExclusiveOwnerThread()) {
+    int nextc = c + acquires;
+    if (nextc < 0) // overflow
+      throw new Error("Maximum lock count exceeded");
+    setState(nextc);
+    return true;
+  }
+  return false;
+}
+```
+
+方法增加了再次获取同步状态的处理逻辑：通过判断当前线程是否为获取锁的线程来 决定获取操作是否成功，如果是获取锁的线程再次请求，则将同步状态值进行增加并返回 true，表示获取同步状态成功。
+
 ## 三、原理
