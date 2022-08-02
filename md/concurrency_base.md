@@ -921,6 +921,8 @@ DelayQueue是一个没有大小限制的队列，因此往队列中插入数据�
 
 ### 4. 锁接口和类
 
+#### 锁分类
+
 ``Synchronized``是Java的关键字，当它用来修饰一个方法或一个代码块时，能够保证在同一时刻最多只有一个线程执行该代码。因为当调用Synchronized修饰的代码时，并不需要显示的加锁和解锁的过程，所以叫**隐式锁**。
 
 synchronized有什么不足之处。
@@ -944,7 +946,7 @@ synchronized有什么不足之处。
 
 实际上，Java在`java.util.concurrent.locks`包下，还为我们提供了几个关于锁的类和接口。它们有更强大的功能或更高的性能。（提供了无条件的、可轮询的、定时的、可中断的锁获取操作，所有的加锁和解锁操作方法都是显示的，因而称为**显示锁**。
 
-#### 可重入锁
+##### 可重入锁
 
 可重入锁，也叫做**递归锁**，指的是同一线程外层函数获得锁之后 ，内层递归函数仍然有获取该锁的代码，但不受影响。
 
@@ -1014,6 +1016,416 @@ final boolean nonfairTryAcquire(int acquires) {
 }
 ```
 
-方法增加了再次获取同步状态的处理逻辑：通过判断当前线程是否为获取锁的线程来 决定获取操作是否成功，如果是获取锁的线程再次请求，则将同步状态值进行增加并返回 true，表示获取同步状态成功。
+方法增加了再次获取同步状态的处理逻辑：通过判断当前线程是否为获取锁的线程来决定获取操作是否成功，如果是获取锁的线程再次请求，则将同步状态值进行增加并返回 true，表示获取同步状态成功。
+
+##### 公平锁和非公平锁
+
+这里的“公平”，其实通俗意义来说就是“先来后到”，也就是FIFO。如果对一个锁来说，先对锁获取请求的线程一定会先被满足，后对锁获取请求的线程后被满足，那这个锁就是公平的。反之，那就是不公平的。
+
+一般情况下，**非公平锁能提升一定的效率。但是非公平锁可能会发生线程饥饿（有一些线程长时间得不到锁）的情况**。所以要根据实际的需求来选择非公平锁和公平锁。
+
+ReentrantLock支持非公平锁和公平锁两种。
+
+```java
+    /**
+     * Creates an instance of {@code ReentrantLock} with the
+     * given fairness policy.
+     *
+     * @param fair {@code true} if this lock should use a fair ordering policy
+     */
+    public ReentrantLock(boolean fair) {
+        sync = fair ? new FairSync() : new NonfairSync();
+    }
+```
+
+##### 读写锁和排他锁
+
+synchronized用的锁和ReentrantLock，其实都是“排它锁”。也就是说，这些锁在同一时刻只允许一个线程进行访问。
+
+而读写锁可以在同一时刻允许多个读线程访问。Java提供了ReentrantReadWriteLock类作为读写锁的默认实现，内部维护了两个锁：一个读锁，一个写锁。通过分离读锁和写锁，使得在“读多写少”的环境下，大大地提高了性能。
+
+> 注意，即使用读写锁，在写线程访问时，所有的读线程和其它写线程均被阻塞。
+
+**可见，只是synchronized是远远不能满足多样化的业务对锁的要求的**。
+
+#### JDK中有关锁的一些接口和类
+
+##### 接口Condition/Lock/ReadWriteLock
+
+juc.locks包下共有三个接口：`Condition`、`Lock`、`ReadWriteLock`。其中，Lock和ReadWriteLock从名字就可以看得出来，分别是锁和读写锁的意思。Lock接口里面有一些获取锁和释放锁的方法声明，而ReadWriteLock里面只有两个方法，分别返回“读锁”和“写锁”：
+
+```java
+public interface ReadWriteLock {
+    Lock readLock();
+    Lock writeLock();
+}
+```
+
+Lock接口中有一个方法是可以获得一个`Condition`:
+
+```java
+Condition newCondition();
+```
+
+每个对象都可以用继承自`Object`的**wait/notify**方法来实现**等待/通知机制**。而Condition接口也提供了类似Object监视器的方法，通过与**Lock**配合来实现等待/通知模式。
+
+二者简单的对比：
+
+| 对比项                                         | Object监视器                  | Condition                                                   |
+| ---------------------------------------------- | ----------------------------- | ----------------------------------------------------------- |
+| 前置条件                                       | 获取对象的锁                  | 调用Lock.lock获取锁，调用Lock.newCondition获取Condition对象 |
+| 调用方式                                       | 直接调用，比如object.notify() | 直接调用，比如condition.await()                             |
+| 等待队列的个数                                 | 一个                          | 多个                                                        |
+| 当前线程释放锁进入等待状态                     | 支持                          | 支持                                                        |
+| 当前线程释放锁进入等待状态，在等待状态中不中断 | 不支持                        | 支持                                                        |
+| 当前线程释放锁并进入超时等待状态               | 支持                          | 支持                                                        |
+| 当前线程释放锁并进入等待状态直到将来的某个时间 | 不支持                        | 支持                                                        |
+| 唤醒等待队列中的一个线程                       | 支持                          | 支持                                                        |
+| 唤醒等待队列中的全部线程                       | 支持                          | 支持                                                        |
+
+Condition和Object的wait/notify基本相似。其中，Condition的await方法对应的是Object的wait方法，而Condition的**signal/signalAll**方法则对应Object的notify/notifyAll()。但Condition类似于Object的等待/通知机制的加强版。
+
+| 方法名称               | 描述                                                         |
+| ---------------------- | ------------------------------------------------------------ |
+| await()                | 当前线程进入等待状态直到被通知（signal）或者中断；当前线程进入运行状态并从await()方法返回的场景包括：（1）其他线程调用相同Condition对象的signal/signalAll方法，并且当前线程被唤醒；（2）其他线程调用interrupt方法中断当前线程； |
+| awaitUninterruptibly() | 当前线程进入等待状态直到被通知，在此过程中对中断信号不敏感，不支持中断当前线程 |
+| awaitNanos(long)       | 当前线程进入等待状态，直到被通知、中断或者超时。如果返回值小于等于0，可以认定就是超时了 |
+| awaitUntil(Date)       | 当前线程进入等待状态，直到被通知、中断或者超时。如果没到指定时间被通知，则返回true，否则返回false |
+| signal()               | 唤醒一个等待在Condition上的线程，被唤醒的线程在方法返回前必须获得与Condition对象关联的锁 |
+| signalAll()            | 唤醒所有等待在Condition上的线程，能够从await()等方法返回的线程必须先获得与Condition对象关联的锁 |
+
+###### 实战LeetCode1115
+
+```java
+class FooBar {
+  public void foo() {
+    for (int i = 0; i < n; i++) {
+      print("foo");
+    }
+  }
+
+  public void bar() {
+    for (int i = 0; i < n; i++) {
+      print("bar");
+    }
+  }
+}
+```
+
+两个不同的线程将会共用一个 FooBar 实例：
+
+* 线程 A 将会调用 foo() 方法，而
+* 线程 B 将会调用 bar() 方法
+
+请设计修改程序，以确保 "foobar" 被输出 n 次。
+
+```java
+class FooBar4 {
+    private int n;
+
+    public FooBar4(int n) {
+        this.n = n;
+    }
+    Lock lock = new ReentrantLock(true);
+    private final Condition foo = lock.newCondition();
+    volatile boolean flag = true;
+    public void foo(Runnable printFoo) throws InterruptedException {
+        for (int i = 0; i < n; i++) {
+            lock.lock();
+            try {
+              // 这里可以改成if吗？
+            	 while(!flag) {
+                    foo.await();
+                }
+                printFoo.run();
+                flag = false;
+                foo.signal();
+            }finally {
+            	lock.unlock();
+            }
+        }
+    }
+
+    public void bar(Runnable printBar) throws InterruptedException {
+        for (int i = 0; i < n;i++) {
+            lock.lock();
+            try {
+            	  while(flag) {
+                    foo.await();
+            	  }
+                printBar.run();
+                flag = true;
+                foo.signal();
+            }finally {
+            	lock.unlock();
+            }
+        }
+    }
+}
+
+作者：idasmilence
+链接：https://leetcode.cn/problems/print-foobar-alternately/solution/duo-xian-cheng-liu-mai-shen-jian-ni-xue-d220n/
+来源：力扣（LeetCode）
+著作权归作者所有。商业转载请联系作者获得授权，非商业转载请注明出处。
+```
+
+##### ReentrantLock
+
+ReentrantLock是一个非抽象类，它是Lock接口的JDK默认实现，实现了锁的基本功能。从名字上看，它是一个”可重入“锁，从源码上看，它内部有一个抽象类`Sync`，是继承了AQS，自己实现的一个同步器。同时，ReentrantLock内部有两个非抽象类`NonfairSync`和`FairSync`，它们都继承了Sync。从名字上看得出，分别是”非公平同步器“和”公平同步器“的意思。这意味着ReentrantLock可以支持”公平锁“和”非公平锁“。
+
+通过看这两个同步器的源码可以发现，它们的实现都是”独占“的。都调用了AOS的`setExclusiveOwnerThread`方法，所以ReentrantLock的锁是”独占“的，也就是说，它的锁都是”排他锁“，不能共享。
+
+在ReentrantLock的构造方法里，可以传入一个`boolean`类型的参数，来指定它是否是一个公平锁，默认情况下是非公平的。这个参数一旦实例化后就不能修改，只能通过`isFair()`方法来查看。
+
+##### ReentrantReadWriteLock
+
+这个类也是一个非抽象类，它是ReadWriteLock接口的JDK默认实现。它与ReentrantLock的功能类似，同样是可重入的，支持非公平锁和公平锁。不同的是，它还支持”读写锁“。
+
+ReentrantReadWriteLock内部的结构大概是这样：
+
+```java
+// 内部结构
+private final ReentrantReadWriteLock.ReadLock readerLock;
+private final ReentrantReadWriteLock.WriteLock writerLock;
+final Sync sync;
+abstract static class Sync extends AbstractQueuedSynchronizer {
+    // 具体实现
+}
+static final class NonfairSync extends Sync {
+    // 具体实现
+}
+static final class FairSync extends Sync {
+    // 具体实现
+}
+public static class ReadLock implements Lock, java.io.Serializable {
+    private final Sync sync;
+    protected ReadLock(ReentrantReadWriteLock lock) {
+            sync = lock.sync;
+    }
+    // 具体实现
+}
+public static class WriteLock implements Lock, java.io.Serializable {
+    private final Sync sync;
+    protected WriteLock(ReentrantReadWriteLock lock) {
+            sync = lock.sync;
+    }
+    // 具体实现
+}
+
+// 构造方法，初始化两个锁
+public ReentrantReadWriteLock(boolean fair) {
+    sync = fair ? new FairSync() : new NonfairSync();
+    readerLock = new ReadLock(this);
+    writerLock = new WriteLock(this);
+}
+
+// 获取读锁和写锁的方法
+public ReentrantReadWriteLock.WriteLock writeLock() { return writerLock; }
+public ReentrantReadWriteLock.ReadLock  readLock()  { return readerLock; }
+```
+
+可以看到，它同样是内部维护了两个同步器。且维护了两个Lock的实现类ReadLock和WriteLock。从源码可以发现，这两个内部类用的是外部类的同步器。
+
+ReentrantReadWriteLock实现了读写锁，但它有一个小弊端，**就是在“写”操作的时候，其它线程不能写也不能读**。我们称这种现象为“写饥饿”。
+
+##### StampedLock
+
+`StampedLock`类是在Java 8 才发布的，也是Doug Lea大神所写，有人号称它为锁的性能之王。它没有实现Lock接口和ReadWriteLock接口，但它其实是实现了“读写锁”的功能，并且性能比ReentrantReadWriteLock更高。StampedLock还把读锁分为了“乐观读锁”和“悲观读锁”两种。
+
+前面提到了ReentrantReadWriteLock会发生“写饥饿”的现象，但StampedLock不会。它是怎么做到的呢？它的核心思想在于，**在读的时候如果发生了写，应该通过重试的方式来获取新的值，而不应该阻塞写操作。这种模式也就是典型的无锁编程思想，和CAS自旋的思想一样**。这种操作方式决定了StampedLock在读线程非常多而写线程非常少的场景下非常适用，同时还避免了写饥饿情况的发生。
+
+### 5. 并发容器集合
+
+在java.util包下提供了一些容器类，而Vector和Hashtable是线程安全的容器类，但是这些容器实现同步的方式是通过对方法加锁(sychronized)方式实现的，这样读写均需要锁操作，导致性能低下。
+
+并发容器是Java 5 提供的在多线程编程下用于代替同步容器，针对不同的应用场景进行设计，提高容器的并发访问性，同时定义了线程安全的复合操作。
+
+#### 并发Map
+
+ConcurrentMap接口继承了Map接口，在Map接口的基础上又定义了四个方法：
+
+```java
+public interface ConcurrentMap<K, V> extends Map<K, V> {
+
+    //插入元素.与原有put方法不同的是，putIfAbsent方法中如果插入的key相同，则不替换原有的value值；
+    V putIfAbsent(K key, V value);
+
+    //移除元素.与原有remove方法不同的是，新remove方法中增加了对value的判断，如果要删除的key-value不能与Map中原有的key-value对应上，则不会删除该元素;
+    boolean remove(Object key, Object value);
+
+    //替换元素.增加了对value值的判断，如果key-oldValue能与Map中原有的key-value对应上，才进行替换操作；
+    boolean replace(K key, V oldValue, V newValue);
+
+    //替换元素.与上面的replace不同的是，此replace不会对Map中原有的key-value进行比较，如果key存在则直接替换；
+    V replace(K key, V value);
+
+}
+```
+
+##### ConcurrentHashMap
+
+ConcurrentHashMap同HashMap一样也是基于散列表的map，但是它提供了一种与Hashtable完全不同的加锁策略，提供更高效的并发性和伸缩性。
+
+ConcurrentHashMap在JDK 1.7 和JDK 1.8中有一些区别。
+
+**1.7**
+
+ConcurrentHashMap在JDK 1.7中，提供了一种粒度更细的加锁机制来实现在多线程下更高的性能，这种机制叫分段锁(Lock Striping)。
+
+提供的优点是：在并发环境下将实现更高的吞吐量，而在单线程环境下只损失非常小的性能。
+
+可以这样理解分段锁，就是**将数据分段，对每一段数据分配一把锁**。当一个线程占用锁访问其中一个段数据的时候，其他段的数据也能被其他线程访问。
+
+有些方法需要跨段，比如size()、isEmpty()、containsValue()，它们可能需要锁定整个表而不仅仅是某个段，这需要按顺序锁定所有段，操作完毕后，又按顺序释放所有段的锁。如下图：
+
+![分段锁机制](https://raw.githubusercontent.com/Hitooooo/docs-my/main/uPic/%E5%88%86%E6%AE%B5%E9%94%81%E6%9C%BA%E5%88%B6.png)
+
+ConcurrentHashMap是由Segment数组结构和HashEntry数组结构组成。Segment是一种可重入锁ReentrantLock，HashEntry则用于存储键值对数据。
+
+一个ConcurrentHashMap里包含一个Segment数组，Segment的结构和HashMap类似，是一种数组和链表结构， 一个Segment里包含一个HashEntry数组，每个HashEntry是一个链表结构的元素， 每个Segment守护着一个HashEntry数组里的元素，当对HashEntry数组的数据进行修改时，必须首先获得它对应的Segment锁。
+
+**1.8**
+
+而在JDK 1.8中，ConcurrentHashMap主要做了两个优化：
+
+- 同HashMap一样，**链表也会在长度达到8的时候转化为红黑树**，这样可以提升大量冲突时候的查询效率；
+- 以某个位置的头结点（链表的头结点或红黑树的root结点）为锁，配合自旋+CAS避免不必要的锁开销，进一步提升并发性能。
+
+#### 并发Queue
+
+JDK并没有提供线程安全的List类，因为对List来说，**很难去开发一个通用并且没有并发瓶颈的线程安全的List**。因为即使简单的读操作，拿contains() 这样一个操作来说，很难想到搜索的时候如何避免锁住整个list。
+
+所以退一步，JDK提供了对队列和双端队列的线程安全的类：ConcurrentLinkedQueue和ConcurrentLinkedDeque。因为队列相对于List来说，有更多的限制。这两个类是使用CAS来实现线程安全的。
+
+#### 并发Set
+
+JDK提供了ConcurrentSkipListSet，是线程安全的有序的集合。底层是使用ConcurrentSkipListMap实现。
+
+#### CopyOnWrite
+
+> CopyOnWrite是计算机设计领域中的一种优化策略，也是一种在并发场景下常用的设计思想——写入时复制思想。
+>
+> 那什么是写入时复制思想呢？就是当有多个调用者同时去请求一个资源数据的时候，有一个调用者出于某些原因需要对当前的数据源进行修改，这个时候系统将会复制一个当前数据源的副本给调用者修改。
+
+CopyOnWrite容器即**写时复制的容器**,当我们往一个容器中添加元素的时候，不直接往容器中添加，而是将当前容器进行copy，复制出来一个新的容器，然后向新容器中添加我们需要的元素，最后将原容器的引用指向新容器。
+
+这样做的好处在于，我们可以在并发的场景下对容器进行"读操作"而不需要"加锁"，从而达到读写分离的目的。从JDK 1.5 开始Java并发包里提供了两个使用CopyOnWrite机制实现的并发容器 ，分别是CopyOnWriteArrayList和CopyOnWriteArraySet 。
+
+##### CopyOnWriteArrayList
+
+**优点**： CopyOnWriteArrayList经常被用于“读多写少”的并发场景，是因为CopyOnWriteArrayList无需任何同步措施，大大增强了读的性能。在Java中遍历线程非安全的List(如：ArrayList和 LinkedList)的时候，若中途有别的线程对List容器进行修改，那么会抛出ConcurrentModificationException异常。CopyOnWriteArrayList由于其"读写分离"，遍历和修改操作分别作用在不同的List容器，所以在使用迭代器遍历的时候，则不会抛出异常。
+
+**缺点**： 第一个缺点是CopyOnWriteArrayList每次执行写操作都会将原容器进行拷贝一份，数据量大的时候，内存会存在较大的压力，可能会引起频繁Full GC（ZGC因为没有使用Full GC）。比如这些对象占用的内存200M左右，那么再写入100M数据进去，内存就会多占用300M。
+
+第二个缺点是CopyOnWriteArrayList由于实现的原因，写和读分别作用在不同新老容器上，在写操作执行过程中，读不会阻塞，但读取到的却是老容器的数据。
+
+##### CopyOnWrite的业务中实现
+
+实现一个CopyOnWriteMap的并发容器
+
+```java
+import java.util.Collection;
+import java.util.Map;
+import java.util.Set;
+
+public class CopyOnWriteMap<K, V> implements Map<K, V>, Cloneable {
+    private volatile Map<K, V> internalMap;
+
+    public CopyOnWriteMap() {
+        internalMap = new HashMap<K, V>();
+    }
+
+    public V put(K key, V value) {
+        synchronized (this) {
+            Map<K, V> newMap = new HashMap<K, V>(internalMap);
+            V val = newMap.put(key, value);
+            internalMap = newMap;
+            return val;
+        }
+    }
+
+    public V get(Object key) {
+        return internalMap.get(key);
+    }
+
+    public void putAll(Map<? extends K, ? extends V> newData) {
+        synchronized (this) {
+            Map<K, V> newMap = new HashMap<K, V>(internalMap);
+            newMap.putAll(newData);
+            internalMap = newMap;
+        }
+    }
+}
+```
+
+
+
+**场景：**假如我们有一个搜索的网站需要屏蔽一些“关键字”，“黑名单”每晚定时更新，每当用户搜索的时候，“黑名单”中的关键字不会出现在搜索结果当中，并且提示用户敏感字。
+
+```java
+// 黑名单服务
+public class BlackListServiceImpl {
+    //　减少扩容开销。根据实际需要，初始化CopyOnWriteMap的大小，避免写时CopyOnWriteMap扩容的开销。
+    private static CopyOnWriteMap<String, Boolean> blackListMap = 
+        new CopyOnWriteMap<String, Boolean>(1000);
+
+    public static boolean isBlackList(String id) {
+        return blackListMap.get(id) == null ? false : true;
+    }
+
+    public static void addBlackList(String id) {
+        blackListMap.put(id, Boolean.TRUE);
+    }
+
+    /**
+     * 批量添加黑名单
+     * (使用批量添加。因为每次添加，容器每次都会进行复制，所以减少添加次数，可以减少容器的复制次数。
+     * 如使用上面代码里的addBlackList方法)
+     * @param ids
+     */
+    public static void addBlackList(Map<String,Boolean> ids) {
+        blackListMap.putAll(ids);
+    }
+
+}
+```
+
+此处的场景是每晚凌晨“黑名单”定时更新，原因是CopyOnWrite容器有**数据一致性**的问题，它只能保证**最终数据一致性**。
+
+### 6. 通信工具类
+
+| 类             | 作用                                       |
+| -------------- | ------------------------------------------ |
+| Semaphore      | 限制线程的数量                             |
+| Exchanger      | 两个线程交换数据                           |
+| CountDownLatch | 线程等待直到计数器减为0时开始工作          |
+| CyclicBarrier  | 作用跟CountDownLatch类似，但是可以重复使用 |
+| Phaser         | 增强的CyclicBarrier                        |
+
+### Fork/Join框架
+
+Fork/Join框架是一个实现了ExecutorService接口的多线程处理器，它专为那些可以通过递归分解成更细小的任务而设计，最大化的利用多核处理器来提高应用程序的性能。
+
+与其他ExecutorService相关的实现相同的是，Fork/Join框架会将任务分配给线程池中的线程。而与之不同的是，Fork/Join框架在执行任务时使用了**工作窃取算法**。
+
+**fork**在英文里有分叉的意思，**join**在英文里连接、结合的意思。顾名思义，fork就是要使一个大任务分解成若干个小任务，而join就是最后将各个小任务的结果结合起来得到大任务的结果。
+
+![fork/join流程图](https://raw.githubusercontent.com/Hitooooo/docs-my/main/uPic/fork_join%E6%B5%81%E7%A8%8B%E5%9B%BE.png)
+
+#### 算法
+
+工作窃取算法指的是在多线程执行不同任务队列的过程中，某个线程执行完自己队列的任务后从其他线程的任务队列里窃取任务来执行。
+
+![工作窃取算法流程](https://raw.githubusercontent.com/Hitooooo/docs-my/main/uPic/%E5%B7%A5%E4%BD%9C%E7%AA%83%E5%8F%96%E7%AE%97%E6%B3%95%E8%BF%90%E8%A1%8C%E6%B5%81%E7%A8%8B%E5%9B%BE.png)
+
+值得注意的是，当一个线程窃取另一个线程的时候，为了减少两个任务线程之间的竞争，我们通常使用**双端队列**来存储任务。被窃取的任务线程都从双端队列的**头部**拿任务执行，而窃取其他任务的线程从双端队列的**尾部**执行任务。
+
+另外，当一个线程在窃取任务时要是没有其他可用的任务了，这个线程会进入**阻塞状态**以等待再次“工作”。
+
+#### 实现
+
+
+
+#### 使用
 
 ## 三、原理
