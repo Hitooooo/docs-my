@@ -1394,6 +1394,8 @@ public class BlackListServiceImpl {
 
 ### 6. 通信工具类
 
+JDK中提供了一些工具类以供开发者使用。这样的话我们在遇到一些常见的应用场景时就可以使用这些工具类，而不用自己再重复造轮子了。
+
 | 类             | 作用                                       |
 | -------------- | ------------------------------------------ |
 | Semaphore      | 限制线程的数量                             |
@@ -1402,7 +1404,13 @@ public class BlackListServiceImpl {
 | CyclicBarrier  | 作用跟CountDownLatch类似，但是可以重复使用 |
 | Phaser         | 增强的CyclicBarrier                        |
 
-### Fork/Join框架
+#### Semaphore
+
+Semaphore翻译过来是信号的意思。顾名思义，这个工具类提供的功能就是多个线程彼此“打信号”。而这个“信号”是一个`int`类型的数据，也可以看成是一种“资源”。
+
+可以在构造函数中传入初始资源总数，以及是否使用“公平”的同步器。默认情况下，是非公平的。
+
+### 7. Fork/Join框架
 
 Fork/Join框架是一个实现了ExecutorService接口的多线程处理器，它专为那些可以通过递归分解成更细小的任务而设计，最大化的利用多核处理器来提高应用程序的性能。
 
@@ -1424,8 +1432,209 @@ Fork/Join框架是一个实现了ExecutorService接口的多线程处理器，�
 
 #### 实现
 
+1. ForkJoinTask
 
+   要实现这个框架，先得有**任务**，ForkJoinTask是一个类似普通线程的实体，但是比普通线程轻量得多。
+
+   **fork()方法**:使用线程池中的空闲线程异步提交任务
+
+   ```java
+   // 本文所有代码都引自Java 8
+   public final ForkJoinTask<V> fork() {
+       Thread t;
+       // ForkJoinWorkerThread是执行ForkJoinTask的专有线程，由ForkJoinPool管理
+       // 先判断当前线程是否是ForkJoin专有线程，如果是，则将任务push到当前线程所负责的队列里去
+       if ((t = Thread.currentThread()) instanceof ForkJoinWorkerThread)
+           ((ForkJoinWorkerThread)t).workQueue.push(this);
+       else
+            // 如果不是则将线程加入队列
+           // 没有显式创建ForkJoinPool的时候走这里，提交任务到默认的common线程池中
+           ForkJoinPool.common.externalPush(this);
+       return this;
+   }
+   ```
+
+   `fork()`只做了一件事，那就是**把任务推入当前工作线程的工作队列里**。
+
+   **join()方法**：等待处理任务的线程处理完毕，获得返回值。
+
+   ```java
+   public final V join() {
+       int s;
+       // doJoin()方法来获取当前任务的执行状态
+       if ((s = doJoin() & DONE_MASK) != NORMAL)
+           // 任务异常，抛出异常
+           reportException(s);
+       // 任务正常完成，获取返回值
+       return getRawResult();
+   }
+   
+   /**
+    * doJoin()方法用来返回当前任务的执行状态
+    **/
+   private int doJoin() {
+       int s; Thread t; ForkJoinWorkerThread wt; ForkJoinPool.WorkQueue w;
+       // 先判断任务是否执行完毕，执行完毕直接返回结果（执行状态）
+       return (s = status) < 0 ? s :
+       // 如果没有执行完毕，先判断是否是ForkJoinWorkThread线程
+       ((t = Thread.currentThread()) instanceof ForkJoinWorkerThread) ?
+           // 如果是，先判断任务是否处于工作队列顶端（意味着下一个就执行它）
+           // tryUnpush()方法判断任务是否处于当前工作队列顶端，是返回true
+           // doExec()方法执行任务
+           (w = (wt = (ForkJoinWorkerThread)t).workQueue).
+           // 如果是处于顶端并且任务执行完毕，返回结果
+           tryUnpush(this) && (s = doExec()) < 0 ? s :
+           // 如果不在顶端或者在顶端却没未执行完毕，那就调用awitJoin()执行任务
+           // awaitJoin()：使用自旋使任务执行完成，返回结果
+           wt.pool.awaitJoin(w, this, 0L) :
+       // 如果不是ForkJoinWorkThread线程，执行externalAwaitDone()返回任务结果
+       externalAwaitDone();
+   }
+   ```
+
+   Thread.join()会使线程阻塞，而ForkJoinPool.join()会使线程免于阻塞，下面是ForkJoinPool.join()的流程图：
+
+   ![join流程图](https://raw.githubusercontent.com/Hitooooo/docs-my/main/uPic/join%E6%B5%81%E7%A8%8B%E5%9B%BE.png)
+
+2. ForkJoinPool
+
+   ForkJoinPool是用于执行ForkJoinTask任务的执行（线程）池。
+
+   ForkJoinPool管理着执行池中的线程和任务队列，此外，执行池是否还接受任务，显示线程的运行状态也是在这里处理。
+
+   ```java
+   public class ForkJoinPool extends AbstractExecutorService {
+       // 任务队列
+       volatile WorkQueue[] workQueues;   
+   
+       // 线程的运行状态
+       volatile int runState;  
+   
+       // 创建ForkJoinWorkerThread的默认工厂，可以通过构造函数重写
+       public static final ForkJoinWorkerThreadFactory defaultForkJoinWorkerThreadFactory;
+   
+       // 公用的线程池，其运行状态不受shutdown()和shutdownNow()的影响
+       static final ForkJoinPool common;
+   
+       // 私有构造方法，没有任何安全检查和参数校验，由makeCommonPool直接调用
+       // 其他构造方法都是源自于此方法
+       // parallelism: 并行度，
+       // 默认调用java.lang.Runtime.availableProcessors() 方法返回可用处理器的数量
+       private ForkJoinPool(int parallelism,
+                            ForkJoinWorkerThreadFactory factory, // 工作线程工厂
+                            UncaughtExceptionHandler handler, // 拒绝任务的handler
+                            int mode, // 同步模式
+                            String workerNamePrefix) { // 线程名prefix
+           this.workerNamePrefix = workerNamePrefix;
+           this.factory = factory;
+           this.ueh = handler;
+           this.config = (parallelism & SMASK) | mode;
+           long np = (long)(-parallelism); // offset ctl counts
+           this.ctl = ((np << AC_SHIFT) & AC_MASK) | ((np << TC_SHIFT) & TC_MASK);
+       }
+   
+   }
+   ```
+
+3. WorkQueue
+
+   双端队列，ForkJoinTask存放在这里。
+
+   当工作线程在处理自己的工作队列时，会从队列首取任务来执行（FIFO）；如果是窃取其他队列的任务时，窃取的任务位于所属任务队列的队尾（LIFO）。
+
+   ForkJoinPool与传统线程池最显著的区别就是它维护了一个**工作队列数组**（volatile WorkQueue[] workQueues，ForkJoinPool中的**每个工作线程都维护着一个工作队列**）。
 
 #### 使用
+
+一个计算斐波那契数列第n项的例子来看一下Fork/Join的使用：
+
+```java
+public class FibonacciTest {
+
+    class Fibonacci extends RecursiveTask<Integer> {
+
+        int n;
+
+        public Fibonacci(int n) {
+            this.n = n;
+        }
+
+        // 主要的实现逻辑都在compute()里
+        @Override
+        protected Integer compute() {
+            // 这里先假设 n >= 0
+            if (n <= 1) {
+                return n;
+            } else {
+                // f(n-1)
+                Fibonacci f1 = new Fibonacci(n - 1);
+                f1.fork();
+                // f(n-2)
+                Fibonacci f2 = new Fibonacci(n - 2);
+                f2.fork();
+                // f(n) = f(n-1) + f(n-2)
+                return f1.join() + f2.join();
+            }
+        }
+    }
+
+    @Test
+    public void testFib() throws ExecutionException, InterruptedException {
+        ForkJoinPool forkJoinPool = new ForkJoinPool();
+        System.out.println("CPU核数：" + Runtime.getRuntime().availableProcessors());
+        long start = System.currentTimeMillis();
+        Fibonacci fibonacci = new Fibonacci(40);
+        Future<Integer> future = forkJoinPool.submit(fibonacci);
+        System.out.println(future.get());
+        long end = System.currentTimeMillis();
+        System.out.println(String.format("耗时：%d millis", end - start));
+    }
+}
+```
+
+### 8. Stream
+
+从Java 8 开始，我们可以使用`Stream`接口以及**lambda表达式**进行“流式计算”。它可以让我们对集合的操作更加简洁、更加可读、更加高效。
+
+Stream接口默认是使用串行的方式，也就是说在一个线程里执行。
+
+```java
+Stream.of(1, 2, 3, 4, 5, 6, 7, 8, 9)
+                .reduce((a, b) -> {
+                    System.out.println(String.format("%s: %d + %d = %d",
+                            Thread.currentThread().getName(), a, b, a + b));
+                    return a + b;
+                })
+                .ifPresent(System.out::println);
+```
+
+修改一下上面的代码，增加一行代码，使Stream使用多线程来并行计算：
+
+```java
+Stream.of(1, 2, 3, 4, 5, 6, 7, 8, 9)
+                .parallel()
+                .reduce((a, b) -> {
+                    System.out.println(String.format("%s: %d + %d = %d",
+                            Thread.currentThread().getName(), a, b, a + b));
+                    return a + b;
+                })
+                .ifPresent(System.out::println);
+```
+
+可以看到输出
+
+```tex
+ForkJoinPool.commonPool-worker-1: 3 + 4 = 7
+ForkJoinPool.commonPool-worker-4: 8 + 9 = 17
+ForkJoinPool.commonPool-worker-2: 5 + 6 = 11
+ForkJoinPool.commonPool-worker-3: 1 + 2 = 3
+ForkJoinPool.commonPool-worker-4: 7 + 17 = 24
+ForkJoinPool.commonPool-worker-4: 11 + 24 = 35
+ForkJoinPool.commonPool-worker-3: 3 + 7 = 10
+ForkJoinPool.commonPool-worker-3: 10 + 35 = 45
+45
+```
+
+很明显地看到，它使用的线程是`ForkJoinPool`里面的`commonPool`里面的**worker**线程。并且它们是并行计算的，并不是串行计算的。但由于Fork/Join框架的作用，它最终能很好的协调计算结果，使得计算结果完全正确。
 
 ## 三、原理
