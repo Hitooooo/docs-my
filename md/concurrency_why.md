@@ -1,5 +1,7 @@
 # 并发编程原理
 
+[toc]
+
 ## Java内存模型
 
 - 线程间如何通信？即：线程之间以何种机制来交换信息
@@ -184,13 +186,172 @@ B1-->A1-->A2-->B2-->A3-->B3
 
 JMM考虑了这两种需求，并且找到了平衡点，对编译器和处理器来说，**只要不改变程序的执行结果（单线程程序和正确同步了的多线程程序），编译器和处理器怎么优化都行。**
 
-而对于程序员，JMM提供了**happens-before规则**（JSR-133规范），满足了程序员的需求——**简单易懂，并且提供了足够强的内存可见性保证。**换言之，程序员只要遵循happens-before规则，那他写的程序就能保证在JMM中具有强的内存可见性。
+而对于程序员，JMM提供了**happens-before规则**（JSR-133规范），满足了程序员的需求——**简单易懂，并且提供了足够强的内存可见性保证。**换言之，**程序员只要遵循happens-before规则，那他写的程序就能保证在JMM中具有强的内存可见性。**
 
+JMM使用happens-before的概念来定制两个操作之间的执行顺序。这两个操作可以在一个线程以内，也可以是不同的线程之间。因此，JMM可以通过happens-before关系向程序员提供跨线程的内存可见性保证。
 
+happens-before关系的定义如下：
+
+1. 如果一个操作happens-before另一个操作，那么第一个操作的执行结果将对第二个操作可见，而且第一个操作的执行顺序排在第二个操作之前。
+2. **两个操作之间存在happens-before关系，并不意味着Java平台的具体实现必须要按照happens-before关系指定的顺序来执行。如果重排序之后的执行结果，与按happens-before关系来执行的结果一致，那么JMM也允许这样的重排序。**
+
+总之，**如果操作A happens-before操作B，那么操作A在内存上所做的操作对操作B都是可见的，不管它们在不在一个线程。**
+
+在Java中存在一些**天然的先行先发生：**
+
+- **程序顺序规则**：一个线程中的每一个操作，happens-before于该线程中的任意后续操作。
+- **监视器锁规则**：对一个锁的解锁，happens-before于随后对这个锁的加锁。
+- **volatile变量规则**：对一个volatile域的写，happens-before于任意后续对这个volatile域的读。
+- **传递性**：如果A happens-before B，且B happens-before C，那么A happens-before C。
+- **start规则**：如果线程A执行操作ThreadB.start()启动线程B，那么A线程的ThreadB.start（）操作happens-before于线程B中的任意操作。
+- **join规则**：如果线程A执行操作ThreadB.join（）并成功返回，那么线程B中的任意操作happens-before于线程A从ThreadB.join()操作成功返回。
+
+```java
+int a = 1; // A操作
+int b = 2; // B操作
+int sum = a + b;// C 操作
+System.out.println(sum);
+```
+
+根据以上介绍的happens-before规则，假如只有一个线程，那么不难得出：
+
+```java
+1> A happens-before B 
+2> B happens-before C 
+3> A happens-before C
+```
+
+注意，真正在执行指令的时候，**其实JVM有可能对操作A & B进行重排序**，因为无论先执行A还是B，他们都对对方是可见的，并且不影响执行结果。
+
+如果这里发生了重排序，这在视觉上违背了happens-before原则，但是JMM是允许这样的重排序的。
+
+所以，我们只关心happens-before规则，不用关心JVM到底是怎样执行的。只要确定操作A happens-before操作B就行了。看起来结果像那么回事就成，愚蠢的人类不需要知道执行细节顺序。
+
+重排序有两类，JMM对这两类重排序有不同的策略：
+
+- 会改变程序执行结果的重排序，比如 A -> C，JMM要求编译器和处理器都禁止这种重排序。
+- 不会改变程序执行结果的重排序，比如 A -> B，JMM对编译器和处理器不做要求，允许这种重排序。
 
 ## volatile
 
+### 名词解释
 
+* 内存可见性：**指的是线程之间的可见性，当一个线程修改了共享变量时，另一个线程可以读取到这个修改后的值**。
+* 重排序：为优化程序性能，对原有的指令执行顺序进行优化重新排序。重排序可能发生在多个阶段，比如编译重排序、CPU重排序等。
+* happens-before规则：是一个给程序员使用的规则，只要程序员在写代码的时候遵循happens-before规则，JVM就能保证指令在多线程之间的顺序性符合程序员的预期。
+
+### volatile内存语义
+
+在Java中，volatile关键字有特殊的内存语义。volatile主要有以下两个功能：
+
+- 保证变量的**内存可见性**
+
+- 禁止volatile变量与普通变量**重排序**（JSR133提出，Java 5 开始才有这个“增强的volatile内存语义”）
+
+  > 编译器在**生成字节码时**，会在指令序列中插入内存屏障来禁止特定类型的处理器重排序。编译器选择了一个**比较保守的JMM内存屏障插入策略**，这样可以保证在任何处理器平台，任何程序中都能得到正确的volatile内存语义。
+
+#### 内存可见性
+
+```java
+public class VolatileExample {
+    int a = 0;
+    volatile boolean flag = false;
+
+    public void writer() {
+        a = 1; // step 1
+        flag = true; // step 2
+    }
+
+    public void reader() {
+        if (flag) { // step 3
+            System.out.println(a); // step 4
+        }
+    }
+}
+```
+
+在这段代码里，我们使用`volatile`关键字修饰了一个`boolean`类型的变量`flag`。
+
+所谓内存可见性，指的是当一个线程对`volatile`修饰的变量进行**写操作**（比如step 2）时，JMM会立即把该线程对应的本地内存中的共享变量的值刷新到主内存；当一个线程对`volatile`修饰的变量进行**读操作**（比如step 3）时，JMM会把立即该线程对应的本地内存置为无效，从主内存中读取共享变量的值。
+
+假设在时间线上，线程A先执行方法`writer`方法，线程B后执行`reader`方法。线程B本地内存中的值会更新成`a = 0, flag = true`
+
+而如果`flag`变量**没有**用`volatile`修饰，在step 2，线程A的本地内存里面的变量就不会立即更新到主内存，那随后线程B也同样不会去主内存拿最新的值，仍然使用线程B本地内存缓存的变量的值`a = 0，flag = false`。
+
+**那考虑这种情况，如果两个线程同时写入被volatile修饰的变量会怎么样？值会正确更新吗？**
+
+![Two threads have read a shared counter variable into their local CPU caches and incremented it.](https://raw.githubusercontent.com/Hitooooo/docs-my/main/uPic/java-volatile-3.png)
+
+图中两个线程读到的值一开始时相同的，但写入的时候其他线程可能先写入了。 对于这种只能通过synchronizd关键字处理了。 只要多个线程涉及了读和写，[volatile is Not Always Enough](http://tutorials.jenkov.com/java-concurrency/volatile.html).一个写，多个读是没有问题的。
+
+同时思考下面的代码，结果会符合预期吗？
+
+```java
+public static class TestData {
+    volatile int num = 0;
+    //synchronized
+    public void updateNum(){
+        num++;  // idea也会提示非原子操作的警告
+    }
+    public static void main(String[] args) {
+        final TestData testData = new TestData();
+        for(int i = 1; i <= 10; i++) {
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    for (int j = 1; j <= 1000; j++) {
+                        testData.updateNum();
+                    }
+                }
+            }).start();
+        }
+
+        while (Thread.activeCount() > 2) {
+            Thread.yield();
+        }
+        System.out.println("最终结果：" + testData.num);
+    }
+}
+```
+
+答案是不会，大概率会小于期望值。
+
+#### 禁止重排序
+
+在JSR-133之前的旧的Java内存模型中，是允许volatile变量与普通变量重排序的。
+
+那上面的案例中，可能就会被重排序成下列时序来执行：
+
+1. 线程A写volatile变量，step 2，设置flag为true；
+2. 线程B读同一个volatile，step 3，读取到flag为true；
+3. 线程B读普通变量，step 4，读取到 a = 0；
+4. 线程A修改普通变量，step 1，设置 a = 1；
+
+可见，如果**volatile变量**与**普通变量**发生了重排序，虽然volatile变量能保证内存可见性，也可能导致**普通变量读取错误。**
+
+为了提供一种比锁更轻量级的**线程间的通信机制**，**JSR-133**专家组决定增强volatile的内存语义：严格限制编译器和处理器对volatile变量与普通变量的重排序。编译器还好说，JVM是怎么还能限制处理器的重排序的呢？它是通过**内存屏障**来实现的。
+
+什么是内存屏障？硬件层面，内存屏障分两种：读屏障（Load Barrier）和写屏障（Store Barrier）。内存屏障有两个作用：
+
+1. 阻止屏障两侧的指令重排序；
+2. 强制把写缓冲区/高速缓存中的脏数据等写回主内存，或者让缓存中相应的数据失效。
+
+编译器在**生成字节码时**，会在指令序列中插入内存屏障来禁止特定类型的处理器重排序。编译器选择了一个**比较保守的JMM内存屏障插入策略**，这样可以保证在任何处理器平台，任何程序中都能得到正确的volatile内存语义。这个策略是：
+
+- 在每个volatile写操作前插入一个StoreStore屏障；
+- 在每个volatile写操作后插入一个StoreLoad屏障；
+- 在每个volatile读操作后插入一个LoadLoad屏障；
+- 在每个volatile读操作后再插入一个LoadStore屏障。
+
+![内存屏障](https://raw.githubusercontent.com/Hitooooo/docs-my/main/uPic/%E5%86%85%E5%AD%98%E5%B1%8F%E9%9A%9C.png)
+
+再介绍一下volatile与普通变量的重排序规则:
+
+1. 如果第一个操作是volatile读，那无论第二个操作是什么，都不能重排序；
+2. 如果第二个操作是volatile写，那无论第一个操作是什么，都不能重排序；
+3. 如果第一个操作是volatile写，第二个操作是volatile读，那不能重排序。
+
+### 用途
 
 ## synchronized与锁
 
@@ -208,3 +369,4 @@ JMM考虑了这两种需求，并且找到了平衡点，对编译器和处理�
 
 - [ ] 阻塞队列原理
 - [ ] synchronized原理
+- [ ] 死锁原因及解决 学一个死锁并解决
