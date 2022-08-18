@@ -199,12 +199,12 @@ happens-before关系的定义如下：
 
 在Java中存在一些**天然的先行先发生：**
 
-- **程序顺序规则**：一个线程中的每一个操作，happens-before于该线程中的任意后续操作。
-- **监视器锁规则**：对一个锁的解锁，happens-before于随后对这个锁的加锁。
-- **volatile变量规则**：对一个volatile域的写，happens-before于任意后续对这个volatile域的读。
-- **传递性**：如果A happens-before B，且B happens-before C，那么A happens-before C。
-- **start规则**：如果线程A执行操作ThreadB.start()启动线程B，那么A线程的ThreadB.start（）操作happens-before于线程B中的任意操作。
-- **join规则**：如果线程A执行操作ThreadB.join（）并成功返回，那么线程B中的任意操作happens-before于线程A从ThreadB.join()操作成功返回。
+* **程序顺序规则**：一个线程中的每一个操作，happens-before于该线程中的任意后续操作。
+* **监视器锁规则**：对一个锁的解锁，happens-before于随后对这个锁的加锁。
+* **volatile变量规则**：对一个volatile域的写，happens-before于任意后续对这个volatile域的读。
+* **传递性**：如果A happens-before B，且B happens-before C，那么A happens-before C。
+* **start规则**：如果线程A执行操作ThreadB.start()启动线程B，那么A线程的ThreadB.start（）操作happens-before于线程B中的任意操作。
+* **join规则**：如果线程A执行操作ThreadB.join（）并成功返回，那么线程B中的任意操作happens-before于线程A从ThreadB.join()操作成功返回。
 
 ```java
 int a = 1; // A操作
@@ -229,8 +229,8 @@ System.out.println(sum);
 
 重排序有两类，JMM对这两类重排序有不同的策略：
 
-- 会改变程序执行结果的重排序，比如 A -> C，JMM要求编译器和处理器都禁止这种重排序。
-- 不会改变程序执行结果的重排序，比如 A -> B，JMM对编译器和处理器不做要求，允许这种重排序。
+* 会改变程序执行结果的重排序，比如 A -> C，JMM要求编译器和处理器都禁止这种重排序。
+* 不会改变程序执行结果的重排序，比如 A -> B，JMM对编译器和处理器不做要求，允许这种重排序。
 
 ## volatile
 
@@ -244,9 +244,9 @@ System.out.println(sum);
 
 在Java中，volatile关键字有特殊的内存语义。volatile主要有以下两个功能：
 
-- 保证变量的**内存可见性**
+* 保证变量的**内存可见性**
 
-- 禁止volatile变量与普通变量**重排序**（JSR133提出，Java 5 开始才有这个“增强的volatile内存语义”）
+* 禁止volatile变量与普通变量**重排序**（JSR133提出，Java 5 开始才有这个“增强的volatile内存语义”）
 
   > 编译器在**生成字节码时**，会在指令序列中插入内存屏障来禁止特定类型的处理器重排序。编译器选择了一个**比较保守的JMM内存屏障插入策略**，这样可以保证在任何处理器平台，任何程序中都能得到正确的volatile内存语义。
 
@@ -316,7 +316,7 @@ public static class TestData {
 
 答案是不会，大概率会小于期望值。
 
-#### 禁止重排序
+#### 禁止重排序（volatile变量和普通变量）
 
 在JSR-133之前的旧的Java内存模型中，是允许volatile变量与普通变量重排序的。
 
@@ -338,10 +338,10 @@ public static class TestData {
 
 编译器在**生成字节码时**，会在指令序列中插入内存屏障来禁止特定类型的处理器重排序。编译器选择了一个**比较保守的JMM内存屏障插入策略**，这样可以保证在任何处理器平台，任何程序中都能得到正确的volatile内存语义。这个策略是：
 
-- 在每个volatile写操作前插入一个StoreStore屏障；
-- 在每个volatile写操作后插入一个StoreLoad屏障；
-- 在每个volatile读操作后插入一个LoadLoad屏障；
-- 在每个volatile读操作后再插入一个LoadStore屏障。
+* 在每个volatile写操作前插入一个StoreStore屏障；
+* 在每个volatile写操作后插入一个StoreLoad屏障；
+* 在每个volatile读操作后插入一个LoadLoad屏障；
+* 在每个volatile读操作后再插入一个LoadStore屏障。
 
 ![内存屏障](https://raw.githubusercontent.com/Hitooooo/docs-my/main/uPic/%E5%86%85%E5%AD%98%E5%B1%8F%E9%9A%9C.png)
 
@@ -353,9 +353,165 @@ public static class TestData {
 
 ### 用途
 
+从volatile的内存语义上来看，volatile可以保证内存可见性且禁止重排序。
+
+在保证内存可见性这一点上，volatile有着与锁相同的内存语义，所以可以作为一个“轻量级”的锁来使用。但由于volatile仅仅保证对单个volatile变量的读/写具有原子性，而锁可以保证整个**临界区代码**的执行具有原子性。所以**在功能上，锁比volatile更强大；在性能上，volatile更有优势**。
+
+**DCL单例**
+
+```java
+public class Singleton {
+
+  // 不使用volatile关键字  
+  private static Singleton instance; 
+
+    // 双重锁检验
+    public static Singleton getInstance() {
+        if (instance == null) { // 第7行
+            synchronized (Singleton.class) {
+                if (instance == null) {
+                    instance = new Singleton(); // 第10行
+                }
+            }
+        }
+        return instance;
+    }
+}
+```
+
+如果这里的变量声明不使用volatile关键字，是可能会发生错误的。它可能会被重排序：
+
+```java
+instance = new Singleton(); // 第10行
+
+// 可以分解为以下三个步骤
+1 memory=allocate();// 分配内存 相当于c的malloc
+2 ctorInstanc(memory) //初始化对象
+3 s=memory //设置s指向刚分配的地址
+
+// 上述三个步骤可能会被重排序为 1-3-2，也就是：
+1 memory=allocate();// 分配内存 相当于c的malloc
+3 s=memory //设置s指向刚分配的地址
+2 ctorInstanc(memory) //初始化对象
+```
+
 ## synchronized与锁
 
+**Java多线程的锁都是基于对象的**，Java中的每一个对象都可以作为一个锁。从源码中可以发现顶层类`Object`中存在锁相关方法。
 
+<img src="https://raw.githubusercontent.com/Hitooooo/docs-my/main/uPic/image-20220818084031411.png" alt="image-20220818084031411" style="zoom: 25%;" />
+
+### 用法
+
+它通常有以下三种形式：
+
+1. 关键字在实例方法上，锁为当前实例
+
+   ```java
+   public synchronized void instanceLock() {
+       // code
+   }
+   ```
+
+2. 关键字在静态方法上，锁为当前Class对象
+
+   ```java
+   public static synchronized void classLock() {
+       // code
+   }
+   ```
+
+3. 关键字在代码块上，锁为括号里面的对象
+
+   ```java
+   public void blockLock() {
+       Object o = new Object();
+       synchronized (o) {
+           // code
+       }
+   }
+   ```
+
+> 所谓“临界区”，指的是某一块代码区域，它同一时刻只能由一个线程执行。
+
+如果`synchronized`关键字在方法上，那临界区就是整个方法内部。而如果是使用synchronized代码块，那临界区就指的是代码块内部的区域。
+
+### 原理
+
+对于如下代码：
+
+```java
+public class SyncTest {
+    public void syncBlock(){
+        synchronized (this){
+            System.out.println("hello block");
+        }
+    }
+    public synchronized void syncMethod(){
+        System.out.println("hello method");
+    }
+}
+```
+
+当SyncTest.java被编译成class文件的时候，`synchronized`关键字和`synchronized`方法的字节码略有不同，我们可以用`javap -v` 命令查看class文件对应的JVM字节码信息，部分信息如下：
+
+```java
+{
+  public void syncBlock();
+    descriptor: ()V
+    flags: ACC_PUBLIC
+    Code:
+      stack=2, locals=3, args_size=1
+         0: aload_0
+         1: dup
+         2: astore_1
+         3: monitorenter				 	  // monitorenter指令进入同步块
+         4: getstatic     #2                  // Field java/lang/System.out:Ljava/io/PrintStream;
+         7: ldc           #3                  // String hello block
+         9: invokevirtual #4                  // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+        12: aload_1
+        13: monitorexit						  // monitorexit指令退出同步块
+        14: goto          22
+        17: astore_2
+        18: aload_1
+        19: monitorexit						  // monitorexit指令退出同步块
+        20: aload_2
+        21: athrow
+        22: return
+      Exception table:
+         from    to  target type
+             4    14    17   any
+            17    20    17   any
+ 
+  public synchronized void syncMethod();
+    descriptor: ()V
+    flags: ACC_PUBLIC, ACC_SYNCHRONIZED      //添加了ACC_SYNCHRONIZED标记
+    Code:
+      stack=2, locals=1, args_size=1
+         0: getstatic     #2                  // Field java/lang/System.out:Ljava/io/PrintStream;
+         3: ldc           #5                  // String hello method
+         5: invokevirtual #4                  // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+         8: return
+ 
+}
+```
+
+从上面的中文注释处可以看到，对于`synchronized`关键字而言，`javac`在编译时，会生成对应的`monitorenter`和`monitorexit`指令分别对应`synchronized`同步块的进入和退出，有两个`monitorexit`指令的原因是：为了保证抛异常的情况下也能释放锁，所以`javac`为同步代码块添加了一个隐式的try-finally，在finally中会调用`monitorexit`命令释放锁。而对于`synchronized`方法而言，`javac`为其生成了一个`ACC_SYNCHRONIZED`关键字，在JVM进行方法调用时，发现调用的方法被`ACC_SYNCHRONIZED`修饰，则会先尝试获得锁。
+
+在JDK 1.6之前,`synchronized`只有传统的锁机制，因此给开发者留下了`synchronized`关键字相比于其他同步机制性能不好的印象。
+
+在JDK 1.6引入了两种新型锁机制：偏向锁和轻量级锁，它们的引入是为了解决在没有多线程竞争或基本没有竞争的场景下因使用传统锁机制带来的性能开销问题。
+
+### 锁类型
+
+所以在Java 6 及其以后，一个对象其实有四种锁状态，它们级别由低到高依次是：
+
+1. 无锁状态
+2. 偏向锁状态
+3. 轻量级锁状态
+4. 重量级锁状态
+
+几种锁会随着竞争情况逐渐升级，锁的升级很容易发生，但是锁降级发生的条件会比较苛刻，锁降级发生在Stop The World期间，当JVM进入安全点的时候，会检查是否有闲置的锁，然后进行降级。
 
 ## CAS和原子操作
 
