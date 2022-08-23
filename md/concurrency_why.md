@@ -609,7 +609,122 @@ Owner：获得锁的线程称为Owner
 > * 长时间自旋可能导致开销大。假如CAS长时间不成功而一直自旋，会给CPU带来很大的开销
 > * ABA问题
 
+乐观锁多用于“读多写少“的环境，避免频繁加锁影响性能；而悲观锁多用于”写多读少“的环境，避免频繁失败和重试影响性能。
 
+### CAS概念(无锁算法)
+
+CAS的全称是：比较并交换（Compare And Swap）。在CAS中，有这样三个值：
+
+* V：要更新的变量(var)
+* E：预期值(expected)
+* N：新值(new)
+
+比较并交换的过程如下：
+
+判断V是否等于E，如果等于，将V的值设置为N；如果不等，说明已经有其它线程更新了V，则当前线程放弃更新，**什么都不做**。
+
+### Java中实现CAS原理
+
+在Java中，有一个`Unsafe`类，它在`sun.misc`包中。它里面是一些`native`方法，其中就有几个关于CAS的：
+
+```java
+    /**
+     * Atomically update Java variable to <tt>x</tt> if it is currently
+     * holding <tt>expected</tt>.
+     * @return <tt>true</tt> if successful
+     */
+    public final native boolean compareAndSwapObject(Object o, long offset,
+                                                     Object expected,
+                                                     Object x);
+
+    /**
+     * Atomically update Java variable to <tt>x</tt> if it is currently
+     * holding <tt>expected</tt>.
+     * @return <tt>true</tt> if successful
+     */
+    public final native boolean compareAndSwapInt(Object o, long offset,
+                                                  int expected,
+                                                  int x);
+
+    /**
+     * Atomically update Java variable to <tt>x</tt> if it is currently
+     * holding <tt>expected</tt>.
+     * @return <tt>true</tt> if successful
+     */
+    public final native boolean compareAndSwapLong(Object o, long offset,
+                                                   long expected,
+                                                   long x);
+```
+
+Unsafe中对CAS的实现是C++写的，它的具体实现和操作系统、CPU都有关系。
+
+Linux的X86下主要是通过`cmpxchgl`这个指令在CPU级完成CAS操作的，但在多处理器情况下必须使用`lock`指令加锁来完成。
+
+### AtomicInteger
+
+以`AtomicInteger`类的`getAndAdd(int delta)`方法为例，来看看Java是如何实现原子操作的。
+
+先看看这个方法的源码：
+
+```java
+public final int getAndAdd(int delta) {
+    return U.getAndAddInt(this, VALUE, delta);
+}
+```
+
+所以其实`AtomicInteger`类的`getAndAdd(int delta)`方法是调用`Unsafe`类的方法来实现的：
+
+```java
+public final int getAndAddInt(Object o, long offset, int delta) {
+    int v;
+    do {
+        v = getIntVolatile(o, offset);
+    } while (!weakCompareAndSetInt(o, offset, v, v + delta));
+    return v;
+}
+```
+
+这里使用的是**do-while循环**。这种循环不多见，它的目的是**保证循环体内的语句至少会被执行一遍**。这样才能保证return 的值`v`是我们期望的值。
+
+再回到循环条件上来，可以看到它是在不断尝试去用CAS更新。如果更新失败，就继续重试。那为什么要把获取“旧值”v的操作放到循环体内呢？其实这也很好理解。前面我们说了，CAS如果旧值V不等于预期值E，它就会更新失败。说明旧的值发生了变化。那我们当然需要返回的是被其他线程改变之后的旧值了，因此放在了do循环体内。
+
+### CAS引入的问题
+
+#### ABA
+
+所谓ABA问题，就是一个值原来是A，变成了B，又变回了A。这个时候使用CAS是检查不出变化的，但实际上却被更新了两次。
+
+ABA问题的解决思路是在变量前面追加上**版本号或者时间戳**。从JDK 1.5开始，JDK的atomic包里提供了一个类`AtomicStampedReference`类来解决ABA问题。
+
+这个类的`compareAndSet`方法的作用是首先检查当前引用是否等于预期引用，并且检查当前标志是否等于预期标志，如果二者都相等，才使用CAS设置为新的值和标志。
+
+```java
+public boolean compareAndSet(V   expectedReference,
+                             V   newReference,
+                             int expectedStamp,
+                             int newStamp) {
+    Pair<V> current = pair;
+    return
+        expectedReference == current.reference &&
+        expectedStamp == current.stamp &&
+        ((newReference == current.reference &&
+          newStamp == current.stamp) ||
+         casPair(current, Pair.of(newReference, newStamp)));
+}
+```
+
+#### 循环时间开销大
+
+CAS多与自旋结合。如果自旋CAS长时间不成功，会占用大量的CPU资源。
+
+解决思路是让JVM支持处理器提供的**pause指令**。
+
+pause指令能让自旋失败时cpu睡眠一小段时间再继续自旋，从而使得读操作的频率低很多,为解决内存顺序冲突而导致的CPU流水线重排的代价也会小很多。
+
+#### 只能保证一个共享变量的原子操作
+
+1. 使用JDK 1.5开始就提供的`AtomicReference`类保证对象之间的原子性，把多个变量放到一个对象里面进行CAS操作；
+2. 使用锁。锁内的临界区代码可以保证只有当前线程能操作。
 
 ## AQS
 
