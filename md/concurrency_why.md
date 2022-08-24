@@ -728,6 +728,322 @@ pause指令能让自旋失败时cpu睡眠一小段时间再继续自旋，从而
 
 ## AQS
 
+**AQS**是`AbstractQueuedSynchronizer`的简称，即`抽象队列同步器`，从字面意思上理解:
+
+* 抽象：抽象类，只实现一些主要逻辑，有些方法由子类实现；
+* 队列：使用先进先出（FIFO）队列存储数据；
+* 同步：实现了同步的功能。
+
+### ReentrantLock与AQS的关联
+
+ReentrantLock支持公平锁和非公平锁，并且ReentrantLock的底层就是由AQS来实现的。非公平锁源码中的加锁流程如下：
+
+```java
+// 非公平锁
+static final class NonfairSync extends Sync {
+	...
+	final void lock() {
+		if (compareAndSetState(0, 1))
+			setExclusiveOwnerThread(Thread.currentThread());
+		else
+			acquire(1);
+		}
+  ...
+}
+```
+
+这块代码的含义为：
+
+* 若通过CAS设置变量State（同步状态）成功，也就是获取锁成功，则将当前线程设置为独占线程。
+* 若通过CAS设置变量State（同步状态）失败，也就是获取锁失败，则进入Acquire方法进行后续处理。
+
+第一步很好理解，但第二步获取锁失败后，后续的处理策略是怎么样的呢？这块可能会有以下思考：
+
+* 某个线程获取锁失败的后续流程是什么呢？有以下两种可能：
+  * 将当前线程获锁结果设置为失败，获取锁流程结束。这种设计会极大降低系统的并发度，并不满足我们实际的需求。所以就需要下面这种流程，也就是AQS框架的处理流程。
+  * **存在某种排队等候机制，线程继续等待，仍然保留获取锁的可能，获取锁流程仍在继续**。
+
+### AQS框架
+
+首先，我们通过下面的架构图来整体了解一下AQS框架：
+
+![img](https://raw.githubusercontent.com/Hitooooo/docs-my/main/uPic/82077ccf14127a87b77cefd1ccf562d3253591.png)
+
+1. 上图中有颜色的为Method，无颜色的为Attribution。
+2. AQS框架共分为五层，自上而下由浅入深，从AQS对外暴露的API到底层基础数据。
+3. 当有自定义同步器接入时，只需重写第一层所需要的部分方法即可，不需要关注底层具体的实现流程。当自定义同步器进行加锁或者解锁操作时，先经过第一层的API进入AQS内部方法，然后经过第二层进行锁的获取，接着对于获取锁失败的流程，进入第三层和第四层的等待队列处理，而这些处理方式均依赖于第五层的基础数据提供层。
+
+### AQS原理
+
+AQS核心思想是，如果被请求的共享资源空闲，那么就将当前请求资源的线程设置为有效的工作线程，将共享资源设置为锁定状态；如果共享资源被占用，就需要一定的阻塞等待唤醒机制来保证锁分配。这个机制主要用的是CLH队列的变体实现的，将暂时获取不到锁的线程加入到队列中。
+
+CLH：Craig、Landin and Hagersten队列，是单向链表，AQS中的队列是CLH变体的虚拟双向队列（FIFO），AQS是通过将每条请求共享资源的线程封装成一个节点来实现锁的分配。
+
+![img](https://raw.githubusercontent.com/Hitooooo/docs-my/main/uPic/7132e4cef44c26f62835b197b239147b18062.png)
+
+AQS使用一个Volatile的int类型的成员变量来表示同步状态，通过内置的FIFO队列来完成资源获取的排队工作，通过CAS完成对State值的修改。
+
+#### 数据结构
+
+AQS中最基本的数据结构——Node，Node即为上面CLH变体队列中的节点。
+
+解释一下几个方法和属性值的含义：
+
+| 方法和属性值 | 含义                                                         |
+| :----------- | :----------------------------------------------------------- |
+| waitStatus   | 当前节点在队列中的状态                                       |
+| thread       | 表示处于该节点的线程                                         |
+| prev         | 前驱指针                                                     |
+| predecessor  | 返回前驱节点，没有的话抛出npe                                |
+| nextWaiter   | 指向下一个处于CONDITION状态的节点（由于本篇文章不讲述Condition Queue队列，这个指针不多介绍） |
+| next         | 后继指针                                                     |
+
+线程两种锁的模式：
+
+| 模式      | 含义                           |
+| :-------- | :----------------------------- |
+| SHARED    | 表示线程以共享的模式等待锁     |
+| EXCLUSIVE | 表示线程正在以独占的方式等待锁 |
+
+waitStatus有下面几个枚举值：
+
+| 枚举      | 含义                                           |
+| :-------- | :--------------------------------------------- |
+| 0         | 当一个Node被初始化的时候的默认值               |
+| CANCELLED | 为1，表示线程获取锁的请求已经取消了            |
+| CONDITION | 为-2，表示节点在等待队列中，节点线程等待唤醒   |
+| PROPAGATE | 为-3，当前线程处在SHARED情况下，该字段才会使用 |
+| SIGNAL    | 为-1，表示线程已经准备好了，就等资源释放了     |
+
+#### 同步状态State
+
+AQS中维护了一个名为state的字段，意为同步状态，是由Volatile修饰的，用于展示当前临界资源的获锁情况。
+
+提供了几个访问这个字段的方法：
+
+| 方法名                                                       | 描述                 |
+| :----------------------------------------------------------- | :------------------- |
+| protected final int getState()                               | 获取State的值        |
+| protected final void setState(int newState)                  | 设置State的值        |
+| protected final boolean compareAndSetState(int expect, int update) | 使用CAS方式更新State |
+
+我们可以通过修改State字段表示的同步状态来实现多线程的独占模式和共享模式（加锁过程）。
+
+独享信号量State=1，共享信号量State=n
+
+#### 获取资源(加锁)
+
+获取资源的入口是acquire(int arg)方法。arg是要获取的资源的个数，在独占模式下始终为1。我们先来看看这个方法的逻辑：
+
+```java
+public final void acquire(int arg) {
+    if (!tryAcquire(arg) &&
+        acquireQueued(addWaiter(Node.EXCLUSIVE), arg))
+        selfInterrupt();
+}
+```
+
+首先调用tryAcquire(arg)尝试去获取资源。前面提到了这个方法是在子类具体实现的。
+
+如果获取资源失败，就通过addWaiter(Node.EXCLUSIVE)方法把这个线程插入到等待队列中。其中传入的参数代表要插入的Node是独占式的。这个方法的具体实现：
+
+```java
+private Node addWaiter(Node mode) {
+    // 生成该线程对应的Node节点
+    Node node = new Node(Thread.currentThread(), mode);
+    // 将Node插入队列中
+    Node pred = tail;
+    if (pred != null) {
+        node.prev = pred;
+        // 使用CAS尝试，如果成功就返回
+        if (compareAndSetTail(pred, node)) {
+            pred.next = node;
+            return node;
+        }
+    }
+    // 如果等待队列为空或者上述CAS失败，再自旋CAS插入
+    enq(node);
+    return node;
+}
+
+// 自旋CAS插入等待队列
+private Node enq(final Node node) {
+    for (;;) {
+        Node t = tail;
+        if (t == null) { // Must initialize
+            if (compareAndSetHead(new Node()))
+                tail = head;
+        } else {
+            node.prev = t;
+            if (compareAndSetTail(t, node)) {
+                t.next = node;
+                return t;
+            }
+        }
+    }
+}
+```
+
+> 在队列的尾部插入新的Node节点，但是需要注意的是由于AQS中会存在多个线程同时争夺资源的情况，因此肯定会出现多个线程同时插入节点的操作，在这里是通过CAS自旋的方式保证了操作的线程安全性。
+
+现在通过addWaiter方法，已经把一个Node放到等待队列尾部了。而处于等待队列的结点是从头结点一个一个去获取资源的。具体的实现我们来看看acquireQueued方法
+
+```java
+final boolean acquireQueued(final Node node, int arg) {
+    boolean failed = true;
+    try {
+        boolean interrupted = false;
+        // 自旋
+        for (;;) {
+            final Node p = node.predecessor();
+            // 如果node的前驱结点p是head，表示node是第二个结点，就可以尝试去获取资源了
+            if (p == head && tryAcquire(arg)) {
+                // 拿到资源后，将head指向该结点。
+                // 所以head所指的结点，就是当前获取到资源的那个结点或null。
+                setHead(node); 
+                p.next = null; // help GC
+                failed = false;
+                return interrupted;
+            }
+            // 如果自己可以休息了，就进入waiting状态，直到被unpark()
+            if (shouldParkAfterFailedAcquire(p, node) &&
+                parkAndCheckInterrupt())
+                interrupted = true;
+        }
+    } finally {
+        if (failed)
+            cancelAcquire(node);
+    }
+}
+```
+
+> 这里parkAndCheckInterrupt方法内部使用到了LockSupport.park(this)，顺便简单介绍一下park。
+>
+> LockSupport类是Java 6 引入的一个类，提供了基本的线程同步原语。LockSupport实际上是调用了Unsafe类里的函数，归结到Unsafe里，只有两个函数：
+>
+> * park(boolean isAbsolute, long time)：阻塞当前线程
+> * unpark(Thread jthread)：使给定的线程停止阻塞
+
+**结点进入等待队列后，是调用park使它进入阻塞状态的。只有头结点的线程是处于活跃状态的**。
+
+当然，获取资源的方法除了acquire外，还有以下三个：
+
+* acquireInterruptibly：申请可中断的资源（独占模式）
+* acquireShared：申请共享模式的资源
+* acquireSharedInterruptibly：申请可中断的资源（共享模式）
+
+![acquire流程](https://raw.githubusercontent.com/Hitooooo/docs-my/main/uPic/acquire%E6%B5%81%E7%A8%8B.jpg)
+
+#### 释放资源(解锁)
+
+```java
+public final boolean release(int arg) {
+    // tryRelease(arg)需要实现类重写
+    if (tryRelease(arg)) {
+        Node h = head;
+        if (h != null && h.waitStatus != 0)
+            unparkSuccessor(h);
+        return true;
+    }
+    return false;
+}
+
+private void unparkSuccessor(Node node) {
+    // 如果状态是负数，尝试把它设置为0
+    int ws = node.waitStatus;
+    if (ws < 0)
+        compareAndSetWaitStatus(node, ws, 0);
+    // 得到头结点的后继结点head.next
+    Node s = node.next;
+    // 如果这个后继结点为空或者状态大于0
+    // 通过前面的定义我们知道，大于0只有一种可能，就是这个结点已被取消
+    if (s == null || s.waitStatus > 0) {
+        s = null;
+        // 等待队列中所有还有用的结点，都向前移动
+        for (Node t = tail; t != null && t != node; t = t.prev)
+            if (t.waitStatus <= 0)
+                s = t;
+    }
+    // 如果后继结点不为空，
+    if (s != null)
+        LockSupport.unpark(s.thread);
+}
+```
+
+### 实践
+
+```java
+public class LeeLock  {
+
+    private static class Sync extends AbstractQueuedSynchronizer {
+        @Override
+        protected boolean tryAcquire (int arg) {
+            return compareAndSetState(0, 1);
+        }
+
+        @Override
+        protected boolean tryRelease (int arg) {
+            setState(0);
+            return true;
+        }
+
+        @Override
+        protected boolean isHeldExclusively () {
+            return getState() == 1;
+        }
+    }
+    
+    private Sync sync = new Sync();
+    
+    public void lock () {
+        sync.acquire(1);
+    }
+    
+    public void unlock () {
+        sync.release(1);
+    }
+}
+```
+
+通过我们自己定义的Lock完成一定的同步功能。
+
+```java
+public class LeeMain {
+
+    static int count = 0;
+    static LeeLock leeLock = new LeeLock();
+
+    public static void main (String[] args) throws InterruptedException {
+
+        Runnable runnable = new Runnable() {
+            @Override
+            public void run () {
+                try {
+                    leeLock.lock();
+                    for (int i = 0; i < 10000; i++) {
+                        count++;
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                } finally {
+                    leeLock.unlock();
+                }
+
+            }
+        };
+        Thread thread1 = new Thread(runnable);
+        Thread thread2 = new Thread(runnable);
+        thread1.start();
+        thread2.start();
+        thread1.join();
+        thread2.join();
+        System.out.println(count);
+    }
+}
+```
+
+上述代码每次运行结果都会是20000。通过简单的几行代码就能实现同步功能，这就是AQS的强大之处。
+
 
 
 
