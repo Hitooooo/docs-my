@@ -1049,5 +1049,5 @@ public class LeeMain {
 
 
 - [ ] 阻塞队列原理
-- [ ] synchronized原理
-- [ ] 死锁原因及解决 学一个死锁并解决
+- [x] synchronized原理
+- [ ] 死锁原因及解决 写一个死锁并解决
