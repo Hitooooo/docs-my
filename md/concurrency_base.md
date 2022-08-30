@@ -77,6 +77,142 @@ CPU通过时间片分配算法来循环执行任务，当前任务执行一个�
 
 这四个条件是死锁的必要条件，只要系统发生死锁，这些条件必然成立，而只要上述条件之一不满足，就不会发生死锁。
 
+```java
+public class DeadLock {
+
+    static final Object lockA = new Object();
+    static final Object lockB = new Object();
+
+    public static void main(String[] args) {
+        Thread thread1 = new Thread(() -> {
+            System.out.println(Thread.currentThread() + "wait A");
+            synchronized (lockA) {
+                System.out.println(Thread.currentThread() + " thread has got A");
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+                System.out.println(Thread.currentThread() + "wait B");
+                synchronized (lockB) {
+                    System.out.println(Thread.currentThread() + "thread has got B");
+                }
+            }
+        }, "thread1");
+        Thread thread2 = new Thread(() -> {
+            System.out.println(Thread.currentThread() + "wait B");
+            synchronized (lockB) {
+                System.out.println(Thread.currentThread() + " thread has got B");
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+                System.out.println(Thread.currentThread() + "wait A");
+                synchronized (lockA) {
+                    System.out.println(Thread.currentThread() + "thread has got A");
+                }
+            }
+        }, "thread2");
+        thread1.start();
+        thread2.start();
+
+        try {
+            thread1.join();
+            thread2.join();
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+        System.out.println("main end");
+    }
+}
+```
+
+> 系统输出：
+>
+> Thread[thread2,5,main]wait B
+> Thread[thread2,5,main] thread has got B
+> Thread[thread1,5,main]wait A
+> Thread[thread1,5,main] thread has got A
+>
+> 这里两个线程发生相互等待的死锁现象
+>
+> Thread[thread1,5,main]wait B
+> Thread[thread2,5,main]wait A
+
+![image-20220830143052332](https://raw.githubusercontent.com/Hitooooo/docs-my/main/pic-go-bed/image-20220830143052332.png)
+
+解决办法，破坏不可剥夺条件，一个线程主动出让资源
+
+```java
+public class DeadLock {
+
+    static final Object lockA = new Object();
+    static final Object lockB = new Object();
+
+    public static void main(String[] args) {
+        Thread thread1 = new Thread(() -> {
+            System.out.println(Thread.currentThread() + "wait A");
+            synchronized (lockA) {
+                System.out.println(Thread.currentThread() + " thread has got A");
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+                System.out.println(Thread.currentThread() + "wait B");
+                synchronized (lockB) {
+                    System.out.println(Thread.currentThread() + "thread has got B");
+                    // 唤醒等待lockB的线程
+                    lockB.notify();
+                }
+            }
+        }, "thread1");
+        Thread thread2 = new Thread(() -> {
+            System.out.println(Thread.currentThread() + "wait B");
+            synchronized (lockB) {
+                System.out.println(Thread.currentThread() + " thread has got B");
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+                // 线程B主动出让，等待唤醒
+                try {
+                    lockB.wait();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+                System.out.println(Thread.currentThread() + "wait A");
+                synchronized (lockA) {
+                    System.out.println(Thread.currentThread() + "thread has got A");
+                }
+            }
+        }, "thread2");
+        thread1.start();
+        thread2.start();
+
+        try {
+            thread1.join();
+            thread2.join();
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+        System.out.println("main end");
+    }
+}
+```
+
+> Thread[thread1,5,main]wait A
+> Thread[thread2,5,main]wait B
+> Thread[thread1,5,main] thread has got A
+> Thread[thread2,5,main] thread has got B
+> Thread[thread1,5,main]wait B
+> Thread[thread1,5,main]thread has got B
+> Thread[thread2,5,main]wait A
+> Thread[thread2,5,main]thread has got A
+> main end
+
 #### 死锁预防
 
 除互斥条件外，可以通过破坏其他三个必要条件打到预防目的：
